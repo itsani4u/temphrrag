@@ -1,0 +1,62 @@
+# app.yaml — Cloud Run service definition (Knative format)
+#
+# Simple manifest you can deploy with:
+#   gcloud run services replace app.yaml --region=<your-region>
+#
+# Before deploying:
+#   1. Replace PROJECT_ID / REGION in the image path below with your own,
+#      after building & pushing the image (see docker.yml / README).
+#   2. Store GOOGLE_API_KEY as a Secret Manager secret named "google-api-key"
+#      (recommended) — or replace the secretKeyRef block with a plain
+#      "value:" env var if you just want something quick and simple.
+#
+# Create the secret once with:
+#   echo -n "YOUR_GEMINI_API_KEY" | gcloud secrets create google-api-key --data-file=-
+#
+# Grant the Cloud Run service account access:
+#   gcloud secrets add-iam-policy-binding google-api-key \
+#     --member="serviceAccount:PROJECT_NUMBER-compute@developer.gserviceaccount.com" \
+#     --role="roles/secretmanager.secretAccessor"
+
+apiVersion: serving.knative.dev/v1
+kind: Service
+metadata:
+  name: hr-rag-chatbot
+  labels:
+    cloud.googleapis.com/location: REGION
+spec:
+  template:
+    metadata:
+      annotations:
+        # Keep at least 0 min instances to allow scale-to-zero (cheapest).
+        # Set to 1 if you want to avoid cold starts.
+        autoscaling.knative.dev/minScale: "0"
+        autoscaling.knative.dev/maxScale: "3"
+    spec:
+      containerConcurrency: 20
+      timeoutSeconds: 300
+      containers:
+        - image: REGION-docker.pkg.dev/PROJECT_ID/hr-rag-repo/hr-rag-chatbot:latest
+          ports:
+            - containerPort: 8080
+          resources:
+            limits:
+              cpu: "1"
+              memory: "1Gi"
+          env:
+            - name: GEMINI_CHAT_MODEL
+              value: "gemini-2.5-flash"
+            - name: GEMINI_EMBEDDING_MODEL
+              value: "models/gemini-embedding-001"
+            - name: GCS_BUCKET_NAME
+              value: "har-rag"
+            - name: GCS_INDEX_PREFIX
+              value: "hr-faiss-index"
+            - name: GOOGLE_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: google-api-key
+                  key: latest
+  traffic:
+    - percent: 100
+      latestRevision: true
